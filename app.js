@@ -38,16 +38,27 @@ class VideoDownloader {
     }
 
     async initFFmpeg() {
-        try {
-            this.ffmpeg = FFmpeg.createFFmpeg({
-                corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
-                log: true
-            });
-            await this.ffmpeg.load();
-        } catch (error) {
-            console.warn('FFmpeg failed to load:', error);
-        }
-    }
+          try {
+              // Проверяем, доступен ли FFmpeg глобально
+              if (typeof window.FFmpeg === 'undefined') {
+                  console.warn('FFmpeg not loaded, skipping initialization');
+                  this.ffmpeg = null;
+                  return;
+              }
+              
+              this.ffmpeg = window.FFmpeg.createFFmpeg({  // Обратите внимание на window.FFmpeg.createFFmpeg
+                  corePath: 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js',
+                  log: false  // Отключаем логи для ускорения
+              });
+              
+              await this.ffmpeg.load();
+              console.log('FFmpeg loaded successfully');
+          } catch (error) {
+              console.warn('FFmpeg failed to load:', error);
+              this.ffmpeg = null; // Приложение будет работать без ffmpeg
+          }
+      }
+    
 
     async registerServiceWorker() {
         if ('serviceWorker' in navigator) {
