@@ -39,28 +39,34 @@ class VideoDownloader {
 
     async initFFmpeg() {
           try {
-              // Проверяем, доступен ли FFmpeg глобально
-              if (typeof window.FFmpeg === 'undefined') {
-                  console.warn('FFmpeg not loaded, skipping initialization');
-                  this.ffmpeg = null;
-                  return;
-              }
-              
-              this.ffmpeg = window.FFmpeg.createFFmpeg({  // Обратите внимание на window.FFmpeg.createFFmpeg
-                  corePath: 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js',
-                  log: false  // Отключаем логи для ускорения
-              });
-              
-              await this.ffmpeg.load();
-              console.log('FFmpeg loaded successfully');
-          } catch (error) {
-              console.warn('FFmpeg failed to load:', error);
-              this.ffmpeg = null; // Приложение будет работать без ffmpeg
+         // Проверяем, доступен ли FFmpeg глобально
+         if (typeof FFmpeg === 'undefined') {
+           console.warn('FFmpeg not loaded, skipping initialization');
+           this.ffmpeg = null;
+           return;
           }
-      }
+          
+          this.ffmpeg = FFmpeg.createFFmpeg({
+            log: true,
+            corePath: 'https://unpkg.com/@ffmpeg/core-st@0.11.0/dist/ffmpeg-core.js',
+          });
+          
+          await this.ffmpeg.load();
+          console.log('FFmpeg loaded successfully');
+        } catch (error) {
+          console.warn('FFmpeg failed to load:', error);
+          this.ffmpeg = null;
+        }
+    }
     
 
     async registerServiceWorker() {
+        // Не регистрируем SW на localhost без HTTPS
+        if (location.hostname === 'localhost' && location.protocol !== 'https:') {
+            console.log('Skipping Service Worker registration on localhost HTTP');
+            return;
+        }
+        
         if ('serviceWorker' in navigator) {
             try {
                 await navigator.serviceWorker.register('/sw.js');
@@ -70,7 +76,7 @@ class VideoDownloader {
             }
         }
     }
-
+    
     async fetchVideoInfo() {
         const url = this.elements.urlInput.value.trim();
         if (!url) return;

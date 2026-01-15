@@ -10,20 +10,58 @@ const CORS_URLS = [
     'tiktok.com', 'instagram.com', 'twitter.com'
 ];
 
+/ Используем более надежный CORS прокси
+const CORS_PROXY = 'https://corsproxy.io/?';
+
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
 
 self.addEventListener('fetch', event => {
-    const url = new URL(event.request.url);
+    const url = event.request.url;
     
-    // Проксируем только запросы к целевым сайтам
-    const shouldProxy = CORS_URLS.some(domain => url.href.includes(domain));
-    
-    if (shouldProxy && event.request.method === 'GET') {
-        event.respondWith(proxyRequest(event.request));
+    // Проксируем только запросы к YouTube
+    if ((url.includes('youtube.com') || url.includes('youtu.be')) && 
+        event.request.method === 'GET' &&
+        !url.includes('corsproxy.io') &&
+        !url.includes('api.allorigins.win')) {
+        
+        event.respondWith(handleYouTubeRequest(event.request));
     }
 });
 
+async function handleYouTubeRequest(request) {
+    try {
+        const proxyUrl = CORS_PROXY + encodeURIComponent(request.url);
+        
+        const headers = new Headers();
+        headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+        headers.set('Referer', 'https://www.youtube.com');
+        headers.set('Origin', 'https://www.youtube.com');
+        headers.set('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
+        
+        const proxyRequest = new Request(proxyUrl, {
+            headers: headers,
+            mode: 'cors'
+        });
+        
+        return await fetch(proxyRequest);
+        
+    } catch (error) {
+        // Fallback к альтернативному прокси
+        try {
+            const altProxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(request.url)}`;
+            return await fetch(altProxy);
+        } catch (fallbackError) {
+            return new Response(JSON.stringify({ 
+                error: 'Failed to proxy request',
+                details: error.message 
+            }), {
+                status: 500,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+    }
+}
 async function proxyRequest(request) {
     try {
         // Добавляем необходимые заголовки

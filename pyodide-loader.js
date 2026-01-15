@@ -75,75 +75,104 @@ class PyodideManager {
         const patchCode = `
     import pyodide.http
     import json
+    import yt_dlp
+    import urllib.parse
     
     # Создаем кэш для запросов
     _request_cache = {}
     
-    def browser_urlopen(self, url):
+    # Используем CORS прокси для YouTube
+    def get_proxy_url(url):
+        import urllib.parse
+        # Используем публичный CORS прокси
+        parsed = urllib.parse.urlparse(url)
+        if 'youtube.com' in parsed.netloc or 'youtu.be' in parsed.netloc:
+            # Используем CORS прокси сервер
+            return f"https://corsproxy.io/?{urllib.parse.quote(url)}"
+        return url
+    
+    def browser_urlopen(self, request):
         global _request_cache
         
-        cache_key = str(url)
+        # Получаем URL из объекта Request или строки
+        if hasattr(request, 'url'):
+            url = request.url
+        else:
+            url = str(request)
+        
+        cache_key = url
         if cache_key in _request_cache:
             return _request_cache[cache_key]
         
         try:
-            # Синхронный запрос через pyodide.http.open_url
-            response = pyodide.http.open_url(str(url))
-            content = response.read()
-            response.close()
+            # Используем проксированный URL для YouTube
+            proxy_url = get_proxy_url(url)
             
-            # Конвертируем bytes в строку если нужно
-            if isinstance(content, bytes):
-                content = content.decode('utf-8', 'ignore')
-            
-            _request_cache[cache_key] = content
-            return content
+            # Для YouTube используем специальный подход
+            if 'youtube.com' in url or 'youtu.be' in url:
+                # Пробуем через js.fetch с прокси
+                import js
+                import asyncio
+                
+                async def fetch_async():
+                    try:
+                        # Используем прокси
+                        response = await js.fetch(proxy_url, {
+                            "mode": "cors",
+                            "credentials": "omit",
+                            "headers": {
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                                "Referer": "https://www.youtube.com",
+                                "Origin": "https://www.youtube.com"
+                            }
+                        })
+                        if response.status == 200:
+                            text = await response.text()
+                            _request_cache[cache_key] = text
+                            return text
+                        else:
+                            raise Exception(f"HTTP {response.status}")
+                    except Exception as e2:
+                        print(f"JS fetch failed: {e2}")
+                        # Пробуем альтернативный прокси
+                        alt_proxy = f"https://api.allorigins.win/raw?url={urllib.parse.quote(url)}"
+                        response2 = await js.fetch(alt_proxy, {"mode": "cors"})
+                        if response2.status == 200:
+                            text = await response2.text()
+                            _request_cache[cache_key] = text
+                            return text
+                        raise
+                
+                from asyncio import run
+                result = run(fetch_async())
+                if result:
+                    return result
+                raise Exception("All fetch attempts failed")
+            else:
+                # Для других сайтов используем стандартный метод
+                response = pyodide.http.open_url(proxy_url)
+                content = response.read()
+                response.close()
+                
+                if isinstance(content, bytes):
+                    content = content.decode('utf-8', 'ignore')
+                
+                _request_cache[cache_key] = content
+                return content
+                
         except Exception as e:
             import sys
             print(f"URL fetch error for {url}: {e}", file=sys.stderr)
-            
-            # Fallback: пробуем через js.fetch асинхронно
-            import js
-            import asyncio
-            
-            # Создаем Future для асинхронного ожидания
-            async def fetch_async():
-                try:
-                    response = await js.fetch(str(url), {
-                        "mode": "cors",
-                        "credentials": "omit",
-                        "headers": {
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                            "Referer": "https://www.google.com"
-                        }
-                    })
-                    text = await response.text()
-                    _request_cache[cache_key] = text
-                    return text
-                except Exception as e2:
-                    print(f"JS fetch also failed: {e2}", file=sys.stderr)
-                    return ""
-            
-            # Запускаем синхронно (блокируем до получения результата)
-            from asyncio import run
-            result = run(fetch_async())
-            if result:
-                _request_cache[cache_key] = result
-                return result
             raise
     
-    # Монки-патчим метод urlopen в YoutubeDL
-    from yt_dlp import YoutubeDL
-    original_urlopen = YoutubeDL.urlopen
+    # Создаем кастомный класс для браузера
+    class BrowserYoutubeDL(yt_dlp.YoutubeDL):
+        def urlopen(self, request):
+            return browser_urlopen(self, request)
     
-    def patched_urlopen(self, url):
-        return browser_urlopen(self, url)
-    
-    YoutubeDL.urlopen = patched_urlopen
-    
-    print("✅ yt-dlp patched for browser environment")
+    print("✅ yt-dlp patched for browser environment with CORS proxy")
     `;
-        
+    
         try {
             await this.pyodide.runPythonAsync(patchCode);
             console.log("yt-dlp patched successfully");
@@ -161,22 +190,28 @@ class PyodideManager {
         if (cached) return cached;
         
         const code = `
-from yt_dlp import YoutubeDL
-import json
-
-ydl_opts = {
-    'quiet': True,
-    'no_warnings': True,
-    'extract_flat': False,
-    'force_generic_extractor': False,
-}
-
-with BrowserYoutubeDL(ydl_opts) as ydl:
-    info = ydl.extract_info('${url.replace(/'/g, "\\'")}', download=False)
-    # Конвертируем в JSON-сериализуемый формат
-    info_json = json.dumps(info, default=str)
-    info_json
-`;
+    import json
+    
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False,
+        'force_generic_extractor': False,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Referer': 'https://www.google.com'
+        }
+    }
+    
+    with BrowserYoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info('${url.replace(/'/g, "\\'")}', download=False)
+        # Конвертируем в JSON-сериализуемый формат
+        info_json = json.dumps(info, default=str)
+        info_json
+    `;
         
         const result = await this.pyodide.runPythonAsync(code);
         const info = JSON.parse(result);
@@ -186,7 +221,7 @@ with BrowserYoutubeDL(ydl_opts) as ydl:
         
         return info;
     }
-
+    
     async getCachedInfo(url) {
         return new Promise((resolve) => {
             const transaction = this.cacheDB.transaction(['extractors'], 'readonly');
