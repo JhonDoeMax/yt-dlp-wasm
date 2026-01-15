@@ -15,19 +15,21 @@ class PyodideManager {
             // Загрузка Pyodide с CDN
             updateStatus('Loading Pyodide runtime...');
             this.pyodide = await loadPyodide({
-                indexURL: "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/",
+                indexURL: "https://cdn.jsdelivr.net/pyodide/v0.29.1/full/",
                 stdout: this.handleStdout.bind(this),
                 stderr: this.handleStderr.bind(this)
             });
-
-            // Установка необходимых пакетов
+           
+            // +++ ДОБАВЬТЕ ЭТИ ДВЕ СТРОКИ +++
+            updateStatus('Loading SSL module...');
+            await this.pyodide.loadPackage("ssl");
+            // +++++++++++++++++++++++++++++++++
+           
+            // Далее продолжайте ваш существующий код установки пакетов
             updateStatus('Installing packages...');
             await this.pyodide.loadPackage(['micropip']);
             const micropip = this.pyodide.pyimport('micropip');
-            
-            // Установка yt-dlp и зависимостей
             await micropip.install('yt-dlp');
-            await micropip.install('websockets'); // Для некоторых extractors
             
             // Monkey-patch для работы в браузере
             await this.patchYtdlp();
