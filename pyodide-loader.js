@@ -70,60 +70,89 @@ class PyodideManager {
         });
     }
 
+    
     async patchYtdlp() {
         const patchCode = `
-import js
-import sys
-from yt_dlp import YoutubeDL
-from yt_dlp.extractor.common import InfoExtractor
-
-class BrowserYoutubeDL(YoutubeDL):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._cache = {}
+    import pyodide.http
+    import json
     
-    def urlopen(self, url):
-        # Используем fetch из JavaScript для обхода CORS
-        import js
-        import json
+    # Создаем кэш для запросов
+    _request_cache = {}
+    
+    def browser_urlopen(self, url):
+        global _request_cache
         
-        # Проверяем кэш
         cache_key = str(url)
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        if cache_key in _request_cache:
+            return _request_cache[cache_key]
         
-        # Делаем запрос через fetch
-        response = js.fetch(str(url), {
-            "mode": "cors",
-            "credentials": "omit",
-            "headers": {
-                "User-Agent": "Mozilla/5.0",
-                "Referer": "https://www.google.com"
-            }
-        })
+        try:
+            # Синхронный запрос через pyodide.http.open_url
+            response = pyodide.http.open_url(str(url))
+            content = response.read()
+            response.close()
+            
+            # Конвертируем bytes в строку если нужно
+            if isinstance(content, bytes):
+                content = content.decode('utf-8', 'ignore')
+            
+            _request_cache[cache_key] = content
+            return content
+        except Exception as e:
+            import sys
+            print(f"URL fetch error for {url}: {e}", file=sys.stderr)
+            
+            # Fallback: пробуем через js.fetch асинхронно
+            import js
+            import asyncio
+            
+            # Создаем Future для асинхронного ожидания
+            async def fetch_async():
+                try:
+                    response = await js.fetch(str(url), {
+                        "mode": "cors",
+                        "credentials": "omit",
+                        "headers": {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                            "Referer": "https://www.google.com"
+                        }
+                    })
+                    text = await response.text()
+                    _request_cache[cache_key] = text
+                    return text
+                except Exception as e2:
+                    print(f"JS fetch also failed: {e2}", file=sys.stderr)
+                    return ""
+            
+            # Запускаем синхронно (блокируем до получения результата)
+            from asyncio import run
+            result = run(fetch_async())
+            if result:
+                _request_cache[cache_key] = result
+                return result
+            raise
+    
+    # Монки-патчим метод urlopen в YoutubeDL
+    from yt_dlp import YoutubeDL
+    original_urlopen = YoutubeDL.urlopen
+    
+    def patched_urlopen(self, url):
+        return browser_urlopen(self, url)
+    
+    YoutubeDL.urlopen = patched_urlopen
+    
+    print("✅ yt-dlp patched for browser environment")
+    `;
         
-        # Конвертируем ответ в строку
-        result = response.text()
-        self._cache[cache_key] = result
-        return result
-
-# Патчим все extractors
-original_extract = InfoExtractor._real_extract
-def patched_extract(self, url):
-    try:
-        return original_extract(self, url)
-    except Exception as e:
-        # Fallback: пробуем через JavaScript
-        import js
-        js.console.warn(f"Extractor failed, trying JS fallback: {e}")
-        # Здесь можно добавить ytdl-core fallback
-        raise
-
-InfoExtractor._real_extract = patched_extract
-`;
-        await this.pyodide.runPythonAsync(patchCode);
+        try {
+            await this.pyodide.runPythonAsync(patchCode);
+            console.log("yt-dlp patched successfully");
+        } catch (error) {
+            console.error("Failed to patch yt-dlp:", error);
+            throw error;
+        }
     }
-
+    
     async extractInfo(url) {
         if (!this.isReady) throw new Error('Pyodide not ready');
         
