@@ -10,7 +10,6 @@ const CORS_URLS = [
     'tiktok.com', 'instagram.com', 'twitter.com'
 ];
 
-/ Используем более надежный CORS прокси
 const CORS_PROXY = 'https://corsproxy.io/?';
 
 self.addEventListener('install', () => self.skipWaiting());
@@ -47,6 +46,7 @@ async function handleYouTubeRequest(request) {
         return await fetch(proxyRequest);
         
     } catch (error) {
+      console.log(error)
         // Fallback к альтернативному прокси
         try {
             const altProxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(request.url)}`;
