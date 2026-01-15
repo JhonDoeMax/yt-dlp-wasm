@@ -10,7 +10,7 @@ const CORS_URLS = [
     'tiktok.com', 'instagram.com', 'twitter.com'
 ];
 
-const CORS_PROXY = 'https://corsproxy.io/?';
+const CORS_PROXY = 'https://proxy.corsfix.com/?';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
@@ -22,6 +22,7 @@ self.addEventListener('fetch', event => {
     if ((url.includes('youtube.com') || url.includes('youtu.be')) && 
         event.request.method === 'GET' &&
         !url.includes('corsproxy.io') &&
+        !url.includes('proxy.corsfix.com') &&
         !url.includes('api.allorigins.win')) {
         
         event.respondWith(handleYouTubeRequest(event.request));
@@ -46,7 +47,7 @@ async function handleYouTubeRequest(request) {
         return await fetch(proxyRequest);
         
     } catch (error) {
-      console.log(error)
+        console.log(error);
         // Fallback к альтернативному прокси
         try {
             const altProxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(request.url)}`;
