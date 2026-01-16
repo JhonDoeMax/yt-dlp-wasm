@@ -73,12 +73,10 @@ class PyodideManager {
     
     async patchYtdlp() {
         const patchCode = `
-    import pyodide
-    import io
+    import pyodide.http
     import json
     import yt_dlp
     import urllib.parse
-    import sys
 
     # Создаем кэш для запросов
     _request_cache = {}
@@ -90,20 +88,8 @@ class PyodideManager {
         parsed = urllib.parse.urlparse(url)
         if 'youtube.com' in parsed.netloc or 'youtu.be' in parsed.netloc:
             # Используем CORS прокси сервер
-            return f"https://proxy.corsfix.com/?{urllib.parse.quote(url)}"
+            return f"https://corsproxy.io/?{urllib.parse.quote(url)}"
         return url
-
-class BrowserResponse:
-    def __init__(self, content, status_code=200):
-        self.content = content
-        self.status_code = status_code
-        self.headers = {}
-
-    def read(self):
-        return self.content
-
-    def close(self):
-        pass
 
     def browser_urlopen(self, request):
         global _request_cache
@@ -116,7 +102,7 @@ class BrowserResponse:
 
         cache_key = url
         if cache_key in _request_cache:
-        return BrowserResponse(_request_cache[cache_key])
+            return _request_cache[cache_key]
 
         try:
             # Используем проксированный URL для YouTube
@@ -124,6 +110,7 @@ class BrowserResponse:
 
             # Для YouTube используем специальный подход
             if 'youtube.com' in url or 'youtu.be' in url:
+                # Пробуем через js.fetch с прокси
                 import js
                 import asyncio
 
@@ -135,40 +122,26 @@ class BrowserResponse:
                              "credentials": "omit"
                         })
                         if response.status == 200:
-                        # Получаем байты
-                        array_buffer = await response.arrayBuffer()
-                        # Конвертируем в Python bytes
-                        uint8_array = js.Uint8Array.new(array_buffer)
-                        py_bytes = pyodide.ffi.toPy(uint8_array)
-                        _request_cache[cache_key] = py_bytes
-                        return py_bytes
+                            text = await response.text()
+                            _request_cache[cache_key] = text
+                            return text
                         else:
                             raise Exception(f"HTTP {response.status}")
                     except Exception as e2:
-                    print(f"JS fetch failed: {e2}", file=sys.stderr)
+                        print(f"JS fetch failed: {e2}")
                         # Пробуем альтернативный прокси
                         alt_proxy = f"https://api.allorigins.win/raw?url={urllib.parse.quote(url)}"
                         response2 = await js.fetch(alt_proxy, {"mode": "cors"})
                         if response2.status == 200:
-                        array_buffer = await response2.arrayBuffer()
-                        uint8_array = js.Uint8Array.new(array_buffer)
-                        py_bytes = pyodide.ffi.toPy(uint8_array)
-                        _request_cache[cache_key] = py_bytes
-                        return py_bytes
+                            text = await response2.text()
+                            _request_cache[cache_key] = text
+                            return text
                         raise
 
-            # Запускаем асинхронный fetch
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Если цикл уже запущен, используем task
-                import asyncio
-                task = asyncio.ensure_future(fetch_async())
-                result = loop.run_until_complete(task)
-            else:
-                result = asyncio.run(fetch_async())
-
+                from asyncio import run
+                result = run(fetch_async())
                 if result:
-                return BrowserResponse(result)
+                    return result
                 raise Exception("All fetch attempts failed")
             else:
                 # Для других сайтов используем стандартный метод
@@ -177,12 +150,10 @@ class BrowserResponse:
                 response.close()
 
                 if isinstance(content, bytes):
+                    content = content.decode('utf-8', 'ignore')
+
                 _request_cache[cache_key] = content
-                return BrowserResponse(content)
-            else:
-                encoded = content.encode('utf-8', 'ignore')
-                _request_cache[cache_key] = encoded
-                return BrowserResponse(encoded)
+                return content
 
         except Exception as e:
             import sys
