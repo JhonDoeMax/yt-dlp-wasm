@@ -77,6 +77,7 @@ class PyodideManager {
     import json
     import yt_dlp
     import urllib.parse
+import io
 
     # Создаем кэш для запросов
     _request_cache = {}
@@ -123,8 +124,24 @@ class PyodideManager {
                         })
                         if response.status == 200:
                             text = await response.text()
-                            _request_cache[cache_key] = text
-                            return text
+                        # Возвращаем объект с методами read() и close()
+                        class ResponseWrapper:
+                            def __init__(self, content):
+                                if isinstance(content, str):
+                                    self.content = content.encode('utf-8')
+                                else:
+                                    self.content = content
+                                self.file = io.BytesIO(self.content)
+
+                            def read(self):
+                                return self.content
+
+                            def close(self):
+                                self.file.close()
+
+                        wrapper = ResponseWrapper(text)
+                        _request_cache[cache_key] = wrapper
+                        return wrapper
                         else:
                             raise Exception(f"HTTP {response.status}")
                     except Exception as e2:
@@ -134,8 +151,23 @@ class PyodideManager {
                         response2 = await js.fetch(alt_proxy, {"mode": "cors"})
                         if response2.status == 200:
                             text = await response2.text()
-                            _request_cache[cache_key] = text
-                            return text
+                        class ResponseWrapper:
+                            def __init__(self, content):
+                                if isinstance(content, str):
+                                    self.content = content.encode('utf-8')
+                                else:
+                                    self.content = content
+                                self.file = io.BytesIO(self.content)
+
+                            def read(self):
+                                return self.content
+
+                            def close(self):
+                                self.file.close()
+
+                        wrapper = ResponseWrapper(text)
+                        _request_cache[cache_key] = wrapper
+                        return wrapper
                         raise
 
                 from asyncio import run
@@ -152,8 +184,24 @@ class PyodideManager {
                 if isinstance(content, bytes):
                     content = content.decode('utf-8', 'ignore')
 
-                _request_cache[cache_key] = content
-                return content
+            # Возвращаем обертку для консистентности
+            class ResponseWrapper:
+                def __init__(self, content):
+                    if isinstance(content, str):
+                        self.content = content.encode('utf-8')
+                    else:
+                        self.content = content
+                    self.file = io.BytesIO(self.content)
+
+                def read(self):
+                    return self.content
+
+                def close(self):
+                    self.file.close()
+
+            wrapper = ResponseWrapper(content)
+            _request_cache[cache_key] = wrapper
+            return wrapper
 
         except Exception as e:
             import sys
