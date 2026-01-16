@@ -1,3 +1,5 @@
+import { patchYtdlp } from './ytdlp-patch.js';
+
 class PyodideManager {
     constructor() {
         this.pyodide = null;
@@ -70,111 +72,8 @@ class PyodideManager {
         });
     }
 
-    
     async patchYtdlp() {
-        const patchCode = `
-    import pyodide.http
-    import json
-    import yt_dlp
-    import urllib.parse
-
-    # Создаем кэш для запросов
-    _request_cache = {}
-
-    # Используем CORS прокси для YouTube
-    def get_proxy_url(url):
-        import urllib.parse
-        # Используем публичный CORS прокси
-        parsed = urllib.parse.urlparse(url)
-        if 'youtube.com' in parsed.netloc or 'youtu.be' in parsed.netloc:
-            # Используем CORS прокси сервер
-            return f"https://corsproxy.io/?{urllib.parse.quote(url)}"
-        return url
-
-    def browser_urlopen(self, request):
-        global _request_cache
-
-        # Получаем URL из объекта Request или строки
-        if hasattr(request, 'url'):
-            url = request.url
-        else:
-            url = str(request)
-
-        cache_key = url
-        if cache_key in _request_cache:
-            return _request_cache[cache_key]
-
-        try:
-            # Используем проксированный URL для YouTube
-            proxy_url = get_proxy_url(url)
-
-            # Для YouTube используем специальный подход
-            if 'youtube.com' in url or 'youtu.be' in url:
-                # Пробуем через js.fetch с прокси
-                import js
-                import asyncio
-
-                async def fetch_async():
-                    try:
-                        # Используем прокси
-                        response = await js.fetch(proxy_url, {
-                            "mode": "cors",
-                             "credentials": "omit"
-                        })
-                        if response.status == 200:
-                            text = await response.text()
-                            _request_cache[cache_key] = text
-                            return text
-                        else:
-                            raise Exception(f"HTTP {response.status}")
-                    except Exception as e2:
-                        print(f"JS fetch failed: {e2}")
-                        # Пробуем альтернативный прокси
-                        alt_proxy = f"https://api.allorigins.win/raw?url={urllib.parse.quote(url)}"
-                        response2 = await js.fetch(alt_proxy, {"mode": "cors"})
-                        if response2.status == 200:
-                            text = await response2.text()
-                            _request_cache[cache_key] = text
-                            return text
-                        raise
-
-                from asyncio import run
-                result = run(fetch_async())
-                if result:
-                    return result
-                raise Exception("All fetch attempts failed")
-            else:
-                # Для других сайтов используем стандартный метод
-                response = pyodide.http.open_url(proxy_url)
-                content = response.read()
-                response.close()
-
-                if isinstance(content, bytes):
-                    content = content.decode('utf-8', 'ignore')
-
-                _request_cache[cache_key] = content
-                return content
-
-        except Exception as e:
-            import sys
-            print(f"URL fetch error for {url}: {e}", file=sys.stderr)
-            raise
-
-    # Создаем кастомный класс для браузера
-    class BrowserYoutubeDL(yt_dlp.YoutubeDL):
-        def urlopen(self, request):
-            return browser_urlopen(self, request)
-
-    print("✅ yt-dlp patched for browser environment with CORS proxy")
-    `;
-
-        try {
-            await this.pyodide.runPythonAsync(patchCode);
-            console.log("yt-dlp patched successfully");
-        } catch (error) {
-            console.error("Failed to patch yt-dlp:", error);
-            throw error;
-        }
+        await patchYtdlp(this.pyodide);
     }
     
     async extractInfo(url) {
